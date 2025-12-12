@@ -24,7 +24,16 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include "internal.h"
-
+static int
+kkk(const char *aaa,const char *bbb)
+{///data/local/tmp strstr(bbb, "/data/local/tmp")
+	if(strlen(bbb) > 0 &&  strstr(bbb, "frida")) {
+		// 过滤xxxx.so
+		//printk(KERN_EMERG "nie %s= %s \n",aaa,bbb);
+		return 1;
+	}
+	return 0;
+}
 #define SEQ_PUT_DEC(str, val) \
 		seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)
 void task_mem(struct seq_file *m, struct mm_struct *mm)
