@@ -316,16 +316,7 @@ static void show_vma_header_prefix(struct seq_file *m,
 	seq_put_decimal_ull(m, " ", ino);
 	seq_putc(m, ' ');
 }
-static int
-kkk(const char *aaa,const char *bbb)
-{///data/local/tmp strstr(bbb, "/data/local/tmp")
-	if(strlen(bbb) > 0 &&  strstr(bbb, "frida")) {
-		// 过滤xxxx.so
-		//printk(KERN_EMERG "nie %s= %s \n",aaa,bbb);
-		return 1;
-	}
-	return 0;
-}
+
 static void
 show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 {
