@@ -1,0 +1,67 @@
+name: Build boot.img
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y \
+          bc \
+          bison \
+          build-essential \
+          curl \
+          flex \
+          gcc-aarch64-linux-gnu \
+          git \
+          libssl-dev \
+          libncurses5-dev \
+          lz4 \
+          python3 \
+          python3-pip \
+          rsync \
+          unzip \
+          wget \
+          zip
+
+    - name: Install Python dependencies
+      run: |
+        pip3 install --user pycryptodome
+
+    - name: Set up toolchain
+      run: |
+        mkdir -p prebuilts
+        cd prebuilts
+        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r498229.tar.gz
+        tar -xzf clang-r498229.tar.gz
+        wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/main.tar.gz
+        tar -xzf main.tar.gz
+        wget -q https://android.googlesource.com/platform/prebuilts/build-tools/+archive/refs/heads/main/linux-x86.tar.gz
+        tar -xzf linux-x86.tar.gz
+
+    - name: Build boot.img
+      run: |
+        export PATH=$(pwd)/prebuilts/clang-r498229/bin:$(pwd)/prebuilts/aarch64-linux-android-4.9/bin:$(pwd)/prebuilts/linux-x86/bin:$PATH
+        export BUILD_CONFIG=common/build.config.gki.aarch64
+        export BUILD_BOOT_IMG=1
+        export LTO=thin
+        
+        ./build/build.sh -j$(nproc)
+
+    - name: Upload boot.img artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot.img
+        path: out/**/boot.img
+        if-no-files-found: error
