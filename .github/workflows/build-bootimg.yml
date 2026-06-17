@@ -1,67 +1,101 @@
-name: Build boot.img
+name: y700-frida-5.10.168 Kernel Build
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  schedule:
+      # 星期六中午12点跑一次
+      - cron: '00 12 * * 6'
   workflow_dispatch:
+  #main分支代码变动后自动编译
+  push:
+    branches:
+      - 111main
 
 jobs:
-  build:
+ Kernel:
+    name: Build on ubuntu-latest 在ubuntu最新版上构建
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
+      - name: Set swap to 10G 将swap设置为10G
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 10
+    
+      - name: Install dependencies 安装依赖关系
+        run: |
+          cd $GITHUB_WORKSPACE
+          sudo apt update && sudo apt install repo -y
+          sudo git config --global user.name "root"
+          sudo git config --global user.email "localhost"
+          sudo timedatectl set-timezone Asia/Shanghai
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update && sudo apt-get install -y \
-          bc \
-          bison \
-          build-essential \
-          curl \
-          flex \
-          gcc-aarch64-linux-gnu \
-          git \
-          libssl-dev \
-          libncurses5-dev \
-          lz4 \
-          python3 \
-          python3-pip \
-          rsync \
-          unzip \
-          wget \
-          zip
+      - name: Clone source code 克隆源代码
+        run: |
+          #repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10-2023-05 --repo-rev=v2.16
+          #sed -i 's/"android12-5.10-2023-05"/"deprecated\/android12-5.10-2023-05"/g' .repo/manifests/default.xml
+          #repo sync
+          ls -a
+          rm -rf *
+          git clone https://github.com/13231178/y700-5.10.209.git ./
+          cd common
+          
+          #remote_version=$(curl -L https://api.github.com/repos/tiann/KernelSU/releases/latest | jq -r .tag_name)
+          #curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s $remote_version
+          #cd KernelSU
+          #echo KSU_VERSION=$remote_version-$(($(git rev-list --count HEAD) + 10200)) | tee -a $GITHUB_ENV
 
-    - name: Install Python dependencies
-      run: |
-        pip3 install --user pycryptodome
 
-    - name: Set up toolchain
-      run: |
-        mkdir -p prebuilts
-        cd prebuilts
-        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r498229.tar.gz
-        tar -xzf clang-r498229.tar.gz
-        wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/main.tar.gz
-        tar -xzf main.tar.gz
-        wget -q https://android.googlesource.com/platform/prebuilts/build-tools/+archive/refs/heads/main/linux-x86.tar.gz
-        tar -xzf linux-x86.tar.gz
+      - name: Build images 构建图像
+        run: |
+          sed -i 's/ -dirty//g' common/scripts/setlocalversion
+          sed -i 's/check_defconfig//g' common/build.config.gki
+          sed -i 's/EXTRAVERSION =/EXTRAVERSION = -GKI-XY/' common/Makefile
+          sed -i 's/"$CONFIG_LOCALVERSION_AUTO" = "y"/"$CONFIG_LOCALVERSION_AUTO" = "n"/' common/scripts/setlocalversion
+          sed -i 's/scm:++/scm:+/' common/scripts/setlocalversion
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+          cd out/android12-5.10/dist
+          export PATCH_LEVEL=2023-09
+          export AVBTOOL=$GITHUB_WORKSPACE/build/build-tools/path/linux-x86/avbtool
+          export GZIP=$GITHUB_WORKSPACE/prebuilts/build-tools/path/linux-x86/gzip
+          export MKBOOTIMG=$GITHUB_WORKSPACE/tools/mkbootimg/mkbootimg.py
+          export UNPACK_BOOTIMG=$GITHUB_WORKSPACE/tools/mkbootimg/unpack_bootimg.py
+          curl -Lo gki-kernel.zip https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-"${PATCH_LEVEL}"_r1.zip
+          unzip gki-kernel.zip && rm gki-kernel.zip
+          BOOT_IMG=$(find . -maxdepth 1 -name "boot*.img")
+          $UNPACK_BOOTIMG --boot_img="$BOOT_IMG"
+          rm "$BOOT_IMG"
+          #修改不压缩
+          #$GZIP -n -k -f -9 Image >Image.gz
+          #$MKBOOTIMG --header_version 4 --kernel Image.gz --output boot-gz.img --ramdisk out/ramdisk --os_version 12.0.0 --os_patch_level "${PATCH_LEVEL}"
+          #$AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot-gz.img --algorithm SHA256_RSA2048 --key $GITHUB_WORKSPACE/prebuilts/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
+          #sudo tar -czvf boot-gz.tar.gz boot-gz.img
 
-    - name: Build boot.img
-      run: |
-        export PATH=$(pwd)/prebuilts/clang-r498229/bin:$(pwd)/prebuilts/aarch64-linux-android-4.9/bin:$(pwd)/prebuilts/linux-x86/bin:$PATH
-        export BUILD_CONFIG=common/build.config.gki.aarch64
-        export BUILD_BOOT_IMG=1
-        export LTO=thin
-        
-        ./build/build.sh -j$(nproc)
+          $MKBOOTIMG --header_version 4 --kernel Image --output boot.img --ramdisk out/ramdisk --os_version 12.0.0 --os_patch_level "${PATCH_LEVEL}"
+          $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot.img --algorithm SHA256_RSA2048 --key $GITHUB_WORKSPACE/prebuilts/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
+          sudo tar -czvf boot.tar.gz boot.img
+      - name: Upload build artifact 上传构建工件
+        uses: actions/upload-artifact@v4
+        with:
+          name: y700-5.10.209
+          path: out/android12-5.10/dist/boot.tar.gz
 
-    - name: Upload boot.img artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot.img
-        path: out/**/boot.img
-        if-no-files-found: error
+      - name: Release 释放
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKENS }}
+        with:
+          tag_name: y700-5.10.209
+          name: y700-5.10.209
+          files: out/android12-5.10/dist/boot.tar.gz
+
+      #- name: Set environment variable 设置环境变量
+      #  run: |
+      #    echo "https://github.com/13231178/kernel-build-rubens-k50/releases/download/latest/boot-gz.tar.gz" >> url.txt
+      #    echo "MESSAGE_FILE_PATH=$(cat url.txt)" >> $GITHUB_ENV
+
+      #- name: Send message via Telegram
+      #  uses: appleboy/telegram-action@master
+      #  with:
+      #    to: ${{ secrets.CHAT_ID }}
+      #    token: ${{ secrets.TELEGRAM_TOKEN }}
+      #    message: "构建任务已完成，当前构建版本为：${{ env.KSU_VERSION }}，请点击以下链接进行下载: ${{ env.MESSAGE_FILE_PATH }}"
